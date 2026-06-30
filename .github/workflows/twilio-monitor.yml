@@ -1,0 +1,94 @@
+name: Monitor Flex (Twilio)
+
+# Roda o monitor do Flex/TaskRouter 3x/dia em dias úteis e publica o
+# resumo no Slack. Substitui a execução manual na máquina do Henrique.
+#
+# Horários (America/Sao_Paulo, UTC-3):
+#   10h30  -> 13:30 UTC
+#   14h00  -> 17:00 UTC
+#   18h00  -> 21:00 UTC
+on:
+  schedule:
+    - cron: "30 13 * * 1-5"   # 10h30 BRT, seg-sex
+    - cron: "0 17 * * 1-5"    # 14h00 BRT, seg-sex
+    - cron: "0 21 * * 1-5"    # 18h00 BRT, seg-sex
+  workflow_dispatch:           # permite rodar manualmente pela aba Actions
+    inputs:
+      minutes:
+        description: "Janela acumulada em minutos"
+        required: false
+        default: "480"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: twilio-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Monta .env.local a partir dos secrets
+        env:
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TWILIO_WORKSPACE_SID: ${{ secrets.TWILIO_WORKSPACE_SID }}
+          TWILIO_SLACK_CHANNEL_ID: ${{ secrets.TWILIO_SLACK_CHANNEL_ID }}
+        run: |
+          cat > .env.local <<EOF
+          TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
+          TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
+          TWILIO_WORKSPACE_SID=${TWILIO_WORKSPACE_SID}
+          TWILIO_SLACK_CHANNEL_ID=${TWILIO_SLACK_CHANNEL_ID}
+          EOF
+
+      - name: Roda o monitor
+        run: |
+          MINUTES="${{ github.event.inputs.minutes || '480' }}"
+          python3 scripts/twilio_agent.py --minutes "$MINUTES" > result.json
+          echo "Resultado salvo em result.json"
+
+      - name: Publica resumo no Slack
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.TWILIO_SLACK_CHANNEL_ID }}
+        run: |
+          MSG=$(python3 -c "import json,sys; print(json.load(open('result.json'))['slack_message'])")
+          python3 - "$MSG" <<'PY'
+          import json, os, sys, urllib.request
+          msg = sys.argv[1]
+          token = os.environ["SLACK_BOT_TOKEN"]
+          channel = os.environ["SLACK_CHANNEL_ID"]
+          body = json.dumps({"channel": channel, "text": msg, "mrkdwn": True}).encode()
+          req = urllib.request.Request(
+              "https://slack.com/api/chat.postMessage",
+              data=body,
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Content-Type": "application/json; charset=utf-8",
+              },
+          )
+          resp = json.load(urllib.request.urlopen(req))
+          if not resp.get("ok"):
+              print(f"[ERRO] Slack respondeu: {resp}", file=sys.stderr)
+              sys.exit(1)
+          print(f"Mensagem publicada em {channel} (ts={resp.get('ts')})")
+          PY
+
+      - name: Limpa .env.local
+        if: always()
+        run: rm -f .env.local

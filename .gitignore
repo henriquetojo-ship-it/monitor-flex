@@ -1,0 +1,6 @@
+.env.local
+.env
+estudos/snapshots/
+result.json
+__pycache__/
+*.pyc
