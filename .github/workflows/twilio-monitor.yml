@@ -89,6 +89,42 @@ jobs:
           print(f"Mensagem publicada em {channel} (ts={resp.get('ts')})")
           PY
 
+      - name: Avisa no Slack se falhar
+        if: failure()
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.TWILIO_SLACK_CHANNEL_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          token = os.environ["SLACK_BOT_TOKEN"]
+          channel = os.environ["SLACK_CHANNEL_ID"]
+          run_url = os.environ["RUN_URL"]
+          msg = (
+              ":red_circle: *Monitor do Flex falhou*\n"
+              "A execução automática não conseguiu rodar nesta janela.\n"
+              f"Ver o erro: {run_url}"
+          )
+          body = json.dumps({"channel": channel, "text": msg, "mrkdwn": True}).encode()
+          req = urllib.request.Request(
+              "https://slack.com/api/chat.postMessage",
+              data=body,
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Content-Type": "application/json; charset=utf-8",
+              },
+          )
+          try:
+              resp = json.load(urllib.request.urlopen(req))
+              if not resp.get("ok"):
+                  print(f"[ERRO] Slack respondeu: {resp}")
+              else:
+                  print(f"Alerta de falha publicado em {channel}")
+          except Exception as e:
+              print(f"[ERRO] Nao consegui avisar no Slack: {e}")
+          PY
+
       - name: Limpa .env.local
         if: always()
         run: rm -f .env.local

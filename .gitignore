@@ -2,5 +2,16 @@
 .env
 estudos/snapshots/
 result.json
+audit.json
+# credenciais de conta de servico Google - NUNCA versionar
+service-account*.json
+sa.json
+gcp-*.json
+mecanizou-*.json
+*-*.iam.gserviceaccount.com.json
+# qualquer chave de conta de servico do Google (padrao <projeto>-<hash>.json)
+*serviceaccount*.json
+*credentials*.json
+.DS_Store
 __pycache__/
 *.pyc
