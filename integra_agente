@@ -1,0 +1,16 @@
+cd monitor-flex
+
+git add \
+  scripts/twilio_agent.py \
+  scripts/audit_agent.py \
+  .github/workflows/twilio-monitor.yml \
+  .github/workflows/audit-agent.yml \
+  .gitignore \
+  requirements.txt \
+  README.md \
+  docs/GUIA-producao-github.md \
+  docs/GUIA-auditoria-passo-a-passo.md
+
+git commit -m "Monitor: Mensagem 1 revisada + Auditoria automática (Mensagem 2) no Slack"
+
+git push origin main
