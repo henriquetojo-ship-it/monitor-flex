@@ -39,6 +39,14 @@ QUEUE_IGNORE = {"everyone", "fila-teste"}
 # Limite de espera para alertar (segundos)
 ALERT_WAIT_THRESHOLD_SEC = 120
 
+# Força máxima de trabalho do time de atendimento (denominador de "X/N online").
+# NÃO é o total_workers do Twilio (que inclui bots, engenheiros e workers de teste).
+# Ajustável via env FORCA_MAXIMA; padrão 9.
+FORCA_MAXIMA_DEFAULT = 9
+
+# Piso saudável da taxa de aceitação (abaixo disso, sinaliza vermelho na leitura).
+ACEITACAO_ALVO_PCT = 85.0
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -325,6 +333,114 @@ def render_slack_message(analysis: dict, data: dict) -> str:
     return "\n".join(lines)
 
 
+def _pct_br(valor) -> str:
+    """Formata um percentual no padrão brasileiro (vírgula decimal). 63.4 -> '63,4'."""
+    return f"{valor}".replace(".", ",")
+
+
+def _leitura_rapida(analysis: dict, saldo: int, conclusao_pct: float, util_pct: float) -> str:
+    """Leitura em linguagem natural, por regras, do 1-2 pontos mais importantes
+    da janela. Sem IA — determinística e barata.
+
+    util_pct é a utilização pautada na força máxima (padrão 9), calculada em
+    render_slack_full — NÃO usar ag['utilization_pct'] (que é sobre o online-base)."""
+    a = analysis
+    ag = a["agents"]
+    cum = a["cumulative"]
+    acc = cum["acceptance_rate_pct"]
+    frases = []
+
+    if acc < ACEITACAO_ALVO_PCT:
+        frases.append(
+            f"Aceitação em {_pct_br(acc)}% é o ponto de atenção — abaixo do saudável "
+            f"(>{int(ACEITACAO_ALVO_PCT)}%). Como a conta é aceitas ÷ (aceitas + recusadas + "
+            f"estouradas por timeout), o número baixo aponta recusa/timeout de reservas, "
+            f"não falta de gente."
+        )
+    else:
+        frases.append(f"Aceitação saudável em {_pct_br(acc)}%.")
+
+    if saldo > 0:
+        frases.append(
+            f"A fila subiu {saldo} tarefas na janela (criou mais do que concluiu) — "
+            f"backlog crescendo."
+        )
+    elif saldo < 0:
+        frases.append(
+            f"A fila caiu {abs(saldo)} tarefas na janela (concluiu mais do que criou) — "
+            f"backlog drenando."
+        )
+    else:
+        frases.append("Fila estável na janela (criadas ≈ concluídas).")
+
+    if ag["available"] > 0 and util_pct < 50:
+        frases.append(
+            f"Com {ag['available']} disponíveis e utilização em {_pct_br(util_pct)}%, "
+            f"há braço livre."
+        )
+
+    return " ".join(frases)
+
+
+def render_slack_full(analysis: dict, data: dict, forca_maxima: int) -> str:
+    """Mensagem 1 — versão revisada/completa dos indicadores, amigável ao Slack.
+    Substitui o corte de uma linha (render_slack_message) na publicação automática.
+
+    Correções pedidas pelo Henrique:
+      • Denominador é a força de trabalho real (padrão 9), não o total_workers (24).
+      • Foto é PARCIAL (não fechamento) e carimbada em horário de Brasília.
+      • Aceitação NÃO é SLA de 30s — é aceitas ÷ (aceitas + recusadas + timeouts).
+      • Espera máxima é o PICO do dia (cum.max_wait_sec), não a fila-instantânea.
+    """
+    a = analysis
+    ag = a["agents"]
+    rt = a["tasks_rt"]
+    cum = a["cumulative"]
+    win = data["minutes_window"]
+    ts = datetime.now().strftime("%d/%m %H:%M")  # TZ da máquina; no CI, forçar TZ=America/Sao_Paulo
+
+    created = cum["tasks_created"]
+    completed = cum["tasks_completed"]
+    conclusao = round(completed / created * 100, 1) if created > 0 else 0.0
+    saldo = created - completed
+    saldo_str = f"+{saldo}" if saldo >= 0 else str(saldo)
+    saldo_nota = " (backlog cresceu)" if saldo > 0 else (" (backlog caiu)" if saldo < 0 else "")
+
+    acc = cum["acceptance_rate_pct"]
+    acc_flag = "" if acc >= ACEITACAO_ALVO_PCT else " 🔴"
+
+    horas = round(win / 60, 1) if win % 60 else win // 60
+
+    # Utilização pautada na força máxima (padrão 9), não no online-base.
+    # Ocupados = online - disponíveis; denominador = forca_maxima. Clampeado em 100%.
+    ocupados = max(0, ag["online"] - ag["available"])
+    util_forca = round(min(ocupados / forca_maxima, 1.0) * 100, 1) if forca_maxima > 0 else 0.0
+
+    lines = [
+        f"*Flex Mecanizou — {ts} BRT (parcial)*",
+        "",
+        "*Força agora*",
+        f"• {ag['online']}/{forca_maxima} online · {ag['available']} disponíveis · {_pct_br(util_forca)}% utilização",
+        f"• {rt['total']} tarefas ativas · {rt['pending']} pendentes",
+        "",
+        f"*Janela (últimos {win}min ≈ {horas}h)*",
+        f"• Criadas: {created} · Concluídas: {completed}",
+        f"• Conclusão: {_pct_br(conclusao)}% · Saldo da janela: {saldo_str}{saldo_nota}",
+        f"• Aceitação: {_pct_br(acc)}%{acc_flag} · Espera média: {fmt_duration(cum['avg_wait_sec'])} · Espera máx (dia): {fmt_duration(cum['max_wait_sec'])}",
+        "",
+        "*Leitura rápida*",
+        _leitura_rapida(a, saldo, conclusao, util_forca),
+    ]
+
+    if a["alerts"]:
+        lines.append("")
+        lines.append("*⚠️ Filas com atenção:*")
+        for aq in a["alerts"]:
+            lines.append(f"• {aq['name']}: {aq['pending']} pendentes, espera {fmt_duration(aq['longest_wait_sec'])}")
+
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Save
 # ---------------------------------------------------------------------------
@@ -363,10 +479,12 @@ def main():
     output_dir = BASE_DIR / args.output_dir
 
     env = load_env()
+    forca_maxima = int(env.get("FORCA_MAXIMA") or FORCA_MAXIMA_DEFAULT)
     data = fetch_all(env, args.minutes)
     analysis = analyze(data)
     report_md = render_report(data, analysis)
     slack_msg = render_slack_message(analysis, data)
+    slack_full = render_slack_full(analysis, data, forca_maxima)
     paths = save_outputs(data, analysis, report_md, output_dir)
 
     # Stdout: JSON estruturado para uso pelo agente/agendador
@@ -374,7 +492,8 @@ def main():
         "ok": True,
         "fetched_at": data["fetched_at"],
         "paths": paths,
-        "slack_message": slack_msg,
+        "slack_message": slack_msg,        # corte de uma linha (legado)
+        "slack_message_full": slack_full,  # versão revisada/completa (padrão a publicar)
         "analysis": analysis,
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))

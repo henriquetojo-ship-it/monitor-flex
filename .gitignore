@@ -1,8 +1,11 @@
 .env.local
 .env
 estudos/snapshots/
+estudos/auditorias/
 result.json
 audit.json
+# conta de servico do Google escrita pelo workflow de auditoria no CI
+google-sa.json
 # credenciais de conta de servico Google - NUNCA versionar
 service-account*.json
 sa.json

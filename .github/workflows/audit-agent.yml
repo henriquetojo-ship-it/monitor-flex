@@ -1,35 +1,38 @@
-name: Monitor Flex (Twilio)
+name: Auditoria de Atendimento (Twilio + Claude)
 
-# Roda o monitor do Flex/TaskRouter 3x/dia em dias úteis e publica o
-# resumo no Slack. Substitui a execução manual na máquina do Henrique.
+# Audita uma amostra das conversas encerradas do dia, grava as notas na planilha
+# Google e publica o resumo consolidado (Mensagem 2) no Slack.
 #
-# Horários (America/Sao_Paulo, UTC-3):
-#   10h30  -> 13:30 UTC
-#   14h00  -> 17:00 UTC
-#   18h00  -> 21:00 UTC
+# Roda 1x/dia, em dias úteis, logo após o último corte do monitor (18h BRT),
+# para pegar o dia praticamente fechado.
+#
+# Horário (America/Sao_Paulo, UTC-3):
+#   18h30 BRT -> 21:30 UTC
 on:
   schedule:
-    - cron: "30 13 * * 1-5"   # 10h30 BRT, seg-sex
-    - cron: "0 17 * * 1-5"    # 14h00 BRT, seg-sex
-    - cron: "0 21 * * 1-5"    # 18h00 BRT, seg-sex
-  workflow_dispatch:           # permite rodar manualmente pela aba Actions
+    - cron: "30 21 * * 1-5"    # 18h30 BRT, seg-sex
+  workflow_dispatch:            # permite rodar manualmente pela aba Actions
     inputs:
-      minutes:
-        description: "Janela acumulada em minutos"
+      sample:
+        description: "Quantas conversas auditar nesta rodada"
         required: false
-        default: "480"
+        default: "10"
+      dry_run:
+        description: "Auditar sem gravar na planilha nem publicar (true/false)?"
+        required: false
+        default: "false"
 
 permissions:
   contents: read
 
 concurrency:
-  group: twilio-monitor
+  group: audit-agent
   cancel-in-progress: false
 
 jobs:
-  monitor:
+  audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     env:
       TZ: America/Sao_Paulo
     steps:
@@ -44,52 +47,37 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Escreve a conta de serviço do Google a partir do secret
+        env:
+          GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
+        run: |
+          printf '%s' "$GOOGLE_SA_JSON" > google-sa.json
+
       - name: Monta .env.local a partir dos secrets
         env:
           TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
           TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
-          TWILIO_WORKSPACE_SID: ${{ secrets.TWILIO_WORKSPACE_SID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           TWILIO_SLACK_CHANNEL_ID: ${{ secrets.TWILIO_SLACK_CHANNEL_ID }}
         run: |
           cat > .env.local <<EOF
           TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
           TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
-          TWILIO_WORKSPACE_SID=${TWILIO_WORKSPACE_SID}
+          ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+          GOOGLE_SHEET_ID=${GOOGLE_SHEET_ID}
+          GOOGLE_SA_FILE=google-sa.json
+          SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
           TWILIO_SLACK_CHANNEL_ID=${TWILIO_SLACK_CHANNEL_ID}
           EOF
 
-      - name: Roda o monitor
+      - name: Roda a auditoria e publica o resumo
         run: |
-          MINUTES="${{ github.event.inputs.minutes || '480' }}"
-          python3 scripts/twilio_agent.py --minutes "$MINUTES" > result.json
-          echo "Resultado salvo em result.json"
-
-      - name: Publica resumo no Slack
-        env:
-          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          SLACK_CHANNEL_ID: ${{ secrets.TWILIO_SLACK_CHANNEL_ID }}
-        run: |
-          MSG=$(python3 -c "import json,sys; print(json.load(open('result.json'))['slack_message_full'])")
-          python3 - "$MSG" <<'PY'
-          import json, os, sys, urllib.request
-          msg = sys.argv[1]
-          token = os.environ["SLACK_BOT_TOKEN"]
-          channel = os.environ["SLACK_CHANNEL_ID"]
-          body = json.dumps({"channel": channel, "text": msg, "mrkdwn": True}).encode()
-          req = urllib.request.Request(
-              "https://slack.com/api/chat.postMessage",
-              data=body,
-              headers={
-                  "Authorization": f"Bearer {token}",
-                  "Content-Type": "application/json; charset=utf-8",
-              },
-          )
-          resp = json.load(urllib.request.urlopen(req))
-          if not resp.get("ok"):
-              print(f"[ERRO] Slack respondeu: {resp}", file=sys.stderr)
-              sys.exit(1)
-          print(f"Mensagem publicada em {channel} (ts={resp.get('ts')})")
-          PY
+          SAMPLE="${{ github.event.inputs.sample || '10' }}"
+          DRY_FLAG=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then DRY_FLAG="--dry-run"; fi
+          python3 scripts/audit_agent.py --sample "$SAMPLE" --post-slack $DRY_FLAG
 
       - name: Avisa no Slack se falhar
         if: failure()
@@ -104,7 +92,7 @@ jobs:
           channel = os.environ["SLACK_CHANNEL_ID"]
           run_url = os.environ["RUN_URL"]
           msg = (
-              ":red_circle: *Monitor do Flex falhou*\n"
+              ":red_circle: *Auditoria de atendimento falhou*\n"
               "A execução automática não conseguiu rodar nesta janela.\n"
               f"Ver o erro: {run_url}"
           )
@@ -127,6 +115,6 @@ jobs:
               print(f"[ERRO] Nao consegui avisar no Slack: {e}")
           PY
 
-      - name: Limpa .env.local
+      - name: Limpa segredos em disco
         if: always()
-        run: rm -f .env.local
+        run: rm -f .env.local google-sa.json
