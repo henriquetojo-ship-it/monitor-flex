@@ -64,7 +64,7 @@ DEFAULT_SHEET_TAB = "Auditorias"
 BRT = timezone(timedelta(hours=-3))
 
 # Peso máximo de cada etapa (fonte: rubrica_auditoria.md — total 100)
-ETAPA_MAX = {"E0": 10, "E1": 25, "E2": 20, "E3": 20, "E4": 15, "E5": 10}
+ETAPA_MAX = {"E0": 10, "E1": 15, "E2": 20, "E3": 20, "E4": 25, "E5": 10}
 ETAPA_ORDEM = ["E0", "E1", "E2", "E3", "E4", "E5"]
 ETAPA_NOME = {
     "E0": "Recebimento e Roteamento",
