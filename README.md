@@ -15,7 +15,7 @@ entrega (B1)**, que abre tickets na plataforma de suporte automaticamente.
   pedido está em hypercare (HC) ou com atraso previsto ≥ 30min. Roda em
   dry-run até a API de tickets ser confirmada com engenharia — ver
   `docs/SPEC-ticket-preventivo-atraso-B1.md`.
-- `.github/workflows/ticket-preventivo.yml` — agendamento a cada 10min,
+- `.github/workflows/ticket-preventivo.yml` — agendamento a cada 5min,
   seg-sex, 08:20–17:30 (America/Sao_Paulo).
 - `scripts/acionamento_entrega_fornecedor.py` — extensão do B1: lê as
   questions 11609, 9319 e 9324 e avalia os novos gatilhos do redesenho de

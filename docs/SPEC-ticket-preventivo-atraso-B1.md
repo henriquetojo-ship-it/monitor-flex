@@ -8,7 +8,7 @@ depende de 3 confirmações de engenharia listadas no final deste documento.
 Fonte de dados: [question 11609 do Metabase](https://metabase.tools.mecanizou.com/question/11609)
 (`estudos/previsao-entrega-com-hypercare.sql`, banco Beta Lake).
 
-A cada 10 minutos, seg-sex, das 08:20 às 17:30 (America/Sao_Paulo):
+A cada 5 minutos, seg-sex, das 08:20 às 17:30 (America/Sao_Paulo):
 
 1. Busca as linhas da question 11609 (uma linha por `order_item_id`).
 2. Agrupa por `order_id`. Um pedido com vários itens precisando de acompanhamento
@@ -34,8 +34,8 @@ A cada 10 minutos, seg-sex, das 08:20 às 17:30 (America/Sao_Paulo):
 - `scripts/ticket_preventivo_atraso.py` — agente completo (fetch, regra,
   dedupe, criação). Suporta `--dry-run` (padrão), `--live`, `--self-test`,
   `--force` (ignora a janela de horário).
-- `.github/workflows/ticket-preventivo.yml` — roda a cada 10min via cron
-  amplo (`*/10 11-20 * * 1-5` UTC) e deixa o script decidir o corte fino
+- `.github/workflows/ticket-preventivo.yml` — roda a cada 5min via cron
+  amplo (`*/5 11-20 * * 1-5` UTC) e deixa o script decidir o corte fino
   de 08:20–17:30 BRT internamente (o cron do GitHub Actions não expressa
   esse corte com precisão de minuto).
 
@@ -98,7 +98,8 @@ padrão).
 
 ## Regra de negócio — decisões já fechadas com Henrique (2026-07-01)
 
-- Rodar a cada 10 minutos, seg-sex, 08:20–17:30 (America/Sao_Paulo).
+- Rodar a cada 5 minutos, seg-sex, 08:20–17:30 (America/Sao_Paulo) — atualizado
+  em 2026-07-13 para alinhar a frequência com o B2.
 - 100% dos itens/pedidos com label HC precisam de ticket.
 - Itens fora de HC com atraso previsto ≥ 30min precisam de ticket.
 - Nome da oficina buscado em CAIXA ALTA.

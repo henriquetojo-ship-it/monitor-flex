@@ -4,9 +4,9 @@ name: Ticket Preventivo (Hypercare / Atraso)
 # em hypercare (label HC) ou com atraso previsto de entrega >= 30 minutos.
 # Fonte de dados: question 11609 do Metabase.
 #
-# A cada 10 minutos, seg-sex, das 08:20 às 17:30 (America/Sao_Paulo, UTC-3).
+# A cada 5 minutos, seg-sex, das 08:20 às 17:30 (America/Sao_Paulo, UTC-3).
 # O cron do GitHub Actions não expressa o corte de minutos com precisão, então
-# rodamos a cada 10min entre 11h e 20h59 UTC (janela ampla) e o próprio script
+# rodamos a cada 5min entre 11h e 20h59 UTC (janela ampla) e o próprio script
 # (ticket_preventivo_atraso.py) decide se está dentro de 08:20-17:30 BRT e
 # encerra sem fazer nada (skipped) caso não esteja.
 #
@@ -15,7 +15,7 @@ name: Ticket Preventivo (Hypercare / Atraso)
 # roda apenas em modo dry-run (sem --live). Ver docs/SPEC-ticket-preventivo-atraso-B1.md.
 on:
   schedule:
-    - cron: "*/10 11-20 * * 1-5"
+    - cron: "*/5 11-20 * * 1-5"
   workflow_dispatch:
     inputs:
       live:
