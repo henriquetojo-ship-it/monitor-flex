@@ -1,0 +1,115 @@
+name: Ticket Preventivo (Hypercare / Atraso)
+
+# Abre tickets preventivos na plataforma de suporte quando um pedido/item está
+# em hypercare (label HC) ou com atraso previsto de entrega >= 30 minutos.
+# Fonte de dados: question 11609 do Metabase.
+#
+# A cada 10 minutos, seg-sex, das 08:20 às 17:30 (America/Sao_Paulo, UTC-3).
+# O cron do GitHub Actions não expressa o corte de minutos com precisão, então
+# rodamos a cada 10min entre 11h e 20h59 UTC (janela ampla) e o próprio script
+# (ticket_preventivo_atraso.py) decide se está dentro de 08:20-17:30 BRT e
+# encerra sem fazer nada (skipped) caso não esteja.
+#
+# IMPORTANTE: enquanto o payload exato de criação de ticket (workshop_id,
+# order_id, autenticação) não for confirmado com engenharia, este workflow
+# roda apenas em modo dry-run (sem --live). Ver docs/SPEC-ticket-preventivo-atraso-B1.md.
+on:
+  schedule:
+    - cron: "*/10 11-20 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      live:
+        description: "Criar tickets de verdade (--live)? Deixe 'false' até a API estar confirmada."
+        required: false
+        default: "false"
+      force:
+        description: "Ignorar a janela de horário 08:20-17:30 BRT (--force)?"
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ticket-preventivo
+  cancel-in-progress: false
+
+jobs:
+  ticket-preventivo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Monta .env.local a partir dos secrets
+        env:
+          METABASE_API_KEY: ${{ secrets.METABASE_API_KEY }}
+          CUSTOMER_SUPPORT_API_URL: ${{ secrets.CUSTOMER_SUPPORT_API_URL }}
+          CUSTOMER_SUPPORT_API_KEY: ${{ secrets.CUSTOMER_SUPPORT_API_KEY }}
+          CUSTOMER_SUPPORT_API_TOKEN: ${{ secrets.CUSTOMER_SUPPORT_API_TOKEN }}
+          CUSTOMER_SUPPORT_ASSIGNEE_UID: ${{ secrets.CUSTOMER_SUPPORT_ASSIGNEE_UID }}
+        run: |
+          cat > .env.local <<EOF
+          METABASE_API_KEY=${METABASE_API_KEY}
+          CUSTOMER_SUPPORT_API_URL=${CUSTOMER_SUPPORT_API_URL}
+          CUSTOMER_SUPPORT_API_KEY=${CUSTOMER_SUPPORT_API_KEY}
+          CUSTOMER_SUPPORT_API_TOKEN=${CUSTOMER_SUPPORT_API_TOKEN}
+          CUSTOMER_SUPPORT_ASSIGNEE_UID=${CUSTOMER_SUPPORT_ASSIGNEE_UID}
+          EOF
+
+      - name: Roda o agente de ticket preventivo
+        run: |
+          LIVE_FLAG=""
+          FORCE_FLAG=""
+          if [ "${{ github.event.inputs.live }}" = "true" ]; then LIVE_FLAG="--live"; fi
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then FORCE_FLAG="--force"; fi
+          python3 scripts/ticket_preventivo_atraso.py $LIVE_FLAG $FORCE_FLAG | tee result.json
+
+      - name: Avisa no Slack se falhar
+        if: failure()
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.TWILIO_SLACK_CHANNEL_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          token = os.environ["SLACK_BOT_TOKEN"]
+          channel = os.environ["SLACK_CHANNEL_ID"]
+          run_url = os.environ["RUN_URL"]
+          msg = (
+              ":red_circle: *Ticket preventivo (hypercare/atraso) falhou*\n"
+              "A execução automática não conseguiu rodar nesta janela.\n"
+              f"Ver o erro: {run_url}"
+          )
+          body = json.dumps({"channel": channel, "text": msg, "mrkdwn": True}).encode()
+          req = urllib.request.Request(
+              "https://slack.com/api/chat.postMessage",
+              data=body,
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Content-Type": "application/json; charset=utf-8",
+              },
+          )
+          try:
+              resp = json.load(urllib.request.urlopen(req))
+              if not resp.get("ok"):
+                  print(f"[ERRO] Slack respondeu: {resp}")
+              else:
+                  print(f"Alerta de falha publicado em {channel}")
+          except Exception as e:
+              print(f"[ERRO] Nao consegui avisar no Slack: {e}")
+          PY
+
+      - name: Limpa .env.local
+        if: always()
+        run: rm -f .env.local
