@@ -1,0 +1,99 @@
+name: Acionamento Entrega Fornecedor (B2 — Fase 0)
+
+# Fase 0 do redesenho do processo de acompanhamento de entregas: avalia os
+# novos gatilhos (fornecedor em atraso na etapa Compras, chegada prevista
+# após 18h, desvio de rota) e apenas LOGA o que faria — nenhuma ação real
+# é disparada nesta fase. Objetivo: validar a detecção por 1-2 semanas
+# comparando o log com o que o time de Ops fez manualmente naquele intervalo.
+#
+# Fonte de dados: questions 11609, 9319, 9324 do Metabase.
+# A cada 5 minutos, seg-sex, 08:00-17:30 (America/Sao_Paulo, UTC-3).
+# Mesmo padrão do B1 (ticket-preventivo.yml): cron amplo no GitHub Actions
+# (não expressa corte de minuto com precisão) + checagem fina de janela
+# dentro do próprio script.
+on:
+  schedule:
+    - cron: "*/5 11-20 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Ignorar a janela de horário 08:00-17:30 BRT (--force)?"
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: acionamento-entrega-fornecedor
+  cancel-in-progress: false
+
+jobs:
+  acionamento-entrega-fornecedor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Monta .env.local a partir dos secrets
+        env:
+          METABASE_API_KEY: ${{ secrets.METABASE_API_KEY }}
+        run: |
+          cat > .env.local <<EOF
+          METABASE_API_KEY=${METABASE_API_KEY}
+          EOF
+
+      - name: Roda o agente de acionamento (diagnóstico, Fase 0)
+        run: |
+          FORCE_FLAG=""
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then FORCE_FLAG="--force"; fi
+          python3 scripts/acionamento_entrega_fornecedor.py $FORCE_FLAG | tee result-b2.json
+
+      - name: Avisa no Slack se falhar
+        if: failure()
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.TWILIO_SLACK_CHANNEL_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          token = os.environ["SLACK_BOT_TOKEN"]
+          channel = os.environ["SLACK_CHANNEL_ID"]
+          run_url = os.environ["RUN_URL"]
+          msg = (
+              ":red_circle: *Acionamento entrega/fornecedor (B2, Fase 0) falhou*\n"
+              "A execução automática (diagnóstico) não conseguiu rodar nesta janela.\n"
+              f"Ver o erro: {run_url}"
+          )
+          body = json.dumps({"channel": channel, "text": msg, "mrkdwn": True}).encode()
+          req = urllib.request.Request(
+              "https://slack.com/api/chat.postMessage",
+              data=body,
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Content-Type": "application/json; charset=utf-8",
+              },
+          )
+          try:
+              resp = json.load(urllib.request.urlopen(req))
+              if not resp.get("ok"):
+                  print(f"[ERRO] Slack respondeu: {resp}")
+              else:
+                  print(f"Alerta de falha publicado em {channel}")
+          except Exception as e:
+              print(f"[ERRO] Nao consegui avisar no Slack: {e}")
+          PY
+
+      - name: Limpa .env.local
+        if: always()
+        run: rm -f .env.local

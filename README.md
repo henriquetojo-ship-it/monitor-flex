@@ -17,10 +17,20 @@ entrega (B1)**, que abre tickets na plataforma de suporte automaticamente.
   `docs/SPEC-ticket-preventivo-atraso-B1.md`.
 - `.github/workflows/ticket-preventivo.yml` — agendamento a cada 10min,
   seg-sex, 08:20–17:30 (America/Sao_Paulo).
+- `scripts/acionamento_entrega_fornecedor.py` — extensão do B1: lê as
+  questions 11609, 9319 e 9324 e avalia os novos gatilhos do redesenho de
+  acompanhamento de entregas (fornecedor em atraso na etapa Compras, cliente
+  com chegada prevista após 18h, desvio de rota do entregador). Roda em modo
+  diagnóstico (log-only, nenhuma ação real) na Fase 0 — ver
+  `docs/SPEC-acionamento-entrega-fornecedor-B2.md`.
+- `.github/workflows/acionamento-entrega-fornecedor.yml` — agendamento a
+  cada 5min, seg-sex, 08:00–17:30 (America/Sao_Paulo).
 - `requirements.txt` — dependências (`requests`, `python-dotenv`).
 - `docs/RUNBOOK-monitor-github-actions.md` — passo a passo de instalação.
 - `docs/SPEC-ticket-preventivo-atraso-B1.md` — regras de negócio, API de
   tickets e o que ainda falta confirmar para o agente B1 rodar em modo `--live`.
+- `docs/SPEC-acionamento-entrega-fornecedor-B2.md` — regras de negócio,
+  limiares de desvio de rota e pendências do agente B2 (fornecedor/entregador).
 
 ## Como colocar no ar
 Siga `docs/RUNBOOK-monitor-github-actions.md`. Resumo:
