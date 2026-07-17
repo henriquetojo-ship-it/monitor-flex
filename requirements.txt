@@ -1,4 +1,6 @@
 requests>=2.31,<3
 python-dotenv>=1.0,<2
-# usado apenas pelo agente de auditoria (audit_agent.py) para gravar na planilha Google
+# usado pelo agente de auditoria (audit_agent.py) para gravar na planilha Google
 google-auth>=2.28,<3
+# usado pelo gerador de PDFs de auditoria (generate_audit_pdfs.py)
+reportlab>=4.0,<5

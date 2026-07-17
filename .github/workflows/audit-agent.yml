@@ -61,6 +61,8 @@ jobs:
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           TWILIO_SLACK_CHANNEL_ID: ${{ secrets.TWILIO_SLACK_CHANNEL_ID }}
+          METABASE_URL: ${{ secrets.METABASE_URL }}
+          METABASE_API_KEY: ${{ secrets.METABASE_API_KEY }}
         run: |
           cat > .env.local <<EOF
           TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
@@ -70,6 +72,8 @@ jobs:
           GOOGLE_SA_FILE=google-sa.json
           SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
           TWILIO_SLACK_CHANNEL_ID=${TWILIO_SLACK_CHANNEL_ID}
+          METABASE_URL=${METABASE_URL}
+          METABASE_API_KEY=${METABASE_API_KEY}
           EOF
 
       - name: Roda a auditoria e publica o resumo
@@ -78,6 +82,10 @@ jobs:
           DRY_FLAG=""
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then DRY_FLAG="--dry-run"; fi
           python3 scripts/audit_agent.py --sample "$SAMPLE" --post-slack $DRY_FLAG
+
+      - name: Gera PDFs de auditoria e envia para Thais no Slack
+        if: github.event.inputs.dry_run != 'true'
+        run: python3 scripts/generate_audit_pdfs.py
 
       - name: Avisa no Slack se falhar
         if: failure()
