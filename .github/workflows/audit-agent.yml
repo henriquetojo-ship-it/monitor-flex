@@ -63,6 +63,7 @@ jobs:
           TWILIO_SLACK_CHANNEL_ID: ${{ secrets.TWILIO_SLACK_CHANNEL_ID }}
           METABASE_URL: ${{ secrets.METABASE_URL }}
           METABASE_API_KEY: ${{ secrets.METABASE_API_KEY }}
+          AUDIT_SHEET_TAB: ${{ secrets.AUDIT_SHEET_TAB }}
         run: |
           cat > .env.local <<EOF
           TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
@@ -74,6 +75,7 @@ jobs:
           TWILIO_SLACK_CHANNEL_ID=${TWILIO_SLACK_CHANNEL_ID}
           METABASE_URL=${METABASE_URL}
           METABASE_API_KEY=${METABASE_API_KEY}
+          AUDIT_SHEET_TAB=${AUDIT_SHEET_TAB}
           EOF
 
       - name: Roda a auditoria e publica o resumo

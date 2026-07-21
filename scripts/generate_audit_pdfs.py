@@ -384,16 +384,19 @@ def main():
     parser = argparse.ArgumentParser(description="Gera PDFs de auditoria e envia para o Slack")
     parser.add_argument("--dry-run", action="store_true",
                         help="Gera os PDFs mas não envia para o Slack")
-    parser.add_argument("--tab", default=DEFAULT_TAB,
-                        help=f"Aba da planilha (padrão: {DEFAULT_TAB})")
+    parser.add_argument("--tab", default=None,
+                        help=f"Aba da planilha (padrão: AUDIT_SHEET_TAB do .env.local ou '{DEFAULT_TAB}')")
     parser.add_argument("--recipient", default=DEFAULT_RECIPIENT,
                         help=f"User ID do Slack (padrão: {DEFAULT_RECIPIENT})")
     args = parser.parse_args()
 
     env = load_env()
 
-    print("Lendo planilha...", file=sys.stderr)
-    rows = read_sheet_rows(env, args.tab)
+    # Prioridade: --tab > AUDIT_SHEET_TAB do env > DEFAULT_TAB
+    tab = args.tab or env.get("AUDIT_SHEET_TAB") or DEFAULT_TAB
+
+    print(f"Lendo planilha (aba: {tab})...", file=sys.stderr)
+    rows = read_sheet_rows(env, tab)
     if not rows:
         print("Planilha vazia ou sem dados.", file=sys.stderr)
         sys.exit(0)
